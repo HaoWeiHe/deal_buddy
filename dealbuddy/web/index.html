@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>好朋友優惠</title>
+<style>
+  :root { --bg:#f6f5f2; --panel:#fff; --ink:#1f1f1c; --muted:#6b6a64; --line:#e4e2dc; --accent:#d9480f; --me:#fde8dc; --good:#2b8a3e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161614; --panel:#201f1c; --ink:#eeede8; --muted:#a3a19a; --line:#34322e; --accent:#ff8a4c; --me:#3a2519; --good:#69db7c; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; }
+  header h1 { font-size:17px; margin:0; }
+  header button { background:none; border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:6px 10px; cursor:pointer; }
+  main { max-width:720px; margin:0 auto; padding:16px 16px 120px; }
+  .msg { margin:10px 0; display:flex; }
+  .msg.me { justify-content:flex-end; }
+  .bubble { max-width:85%; padding:10px 12px; border-radius:14px; background:var(--panel); border:1px solid var(--line); white-space:pre-wrap; }
+  .me .bubble { background:var(--me); border-color:transparent; }
+  .cards { display:grid; gap:8px; margin:6px 0 14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .card h3 { margin:0 0 4px; font-size:15px; }
+  .meta { color:var(--muted); font-size:13px; }
+  .why { margin:6px 0; font-size:14px; }
+  .warn { color:var(--accent); font-size:13px; }
+  .actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .actions button { border:1px solid var(--line); background:transparent; color:var(--ink); border-radius:999px; padding:4px 10px; cursor:pointer; font-size:13px; }
+  .actions button.done { border-color:var(--good); color:var(--good); }
+  form { position:fixed; bottom:0; left:0; right:0; background:var(--panel); border-top:1px solid var(--line); padding:10px 16px; }
+  .row { max-width:720px; margin:0 auto; display:flex; gap:8px; align-items:center; }
+  textarea { flex:1; resize:none; border:1px solid var(--line); border-radius:10px; padding:8px 10px; font:inherit; background:var(--bg); color:var(--ink); height:44px; }
+  .send { background:var(--accent); color:#fff; border:0; border-radius:10px; padding:10px 14px; cursor:pointer; }
+  label.img { cursor:pointer; font-size:20px; }
+  #profile { display:none; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; }
+  #profile h2 { font-size:15px; margin:0 0 8px; }
+  .chip { display:inline-flex; gap:4px; align-items:center; border:1px solid var(--line); border-radius:999px; padding:2px 8px; margin:2px; font-size:13px; }
+  .chip button { border:0; background:none; color:var(--muted); cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>好朋友優惠 🐑</h1>
+  <div><button id="digestBtn">今天的推薦</button> <button id="profileBtn">你眼中的我</button></div>
+</header>
+<main>
+  <section id="profile"></section>
+  <div id="log"></div>
+</main>
+<form id="f">
+  <div class="row">
+    <label class="img" title="分享截圖">📷<input id="img" type="file" accept="image/*" hidden></label>
+    <textarea id="t" placeholder="問我最近有什麼好康，或貼上你看到的優惠"></textarea>
+    <button class="send">送出</button>
+  </div>
+</form>
+<script>
+const uid = (() => { try { let v = localStorage.getItem("dealbuddy_uid"); if (!v) { v = "web:" + crypto.randomUUID().slice(0, 8); localStorage.setItem("dealbuddy_uid", v); } return v; } catch { return "web:guest"; } })();
+const token = (() => {
+  const q = new URLSearchParams(location.search).get("token");
+  try { if (q) localStorage.setItem("dealbuddy_token", q); return q || localStorage.getItem("dealbuddy_token") || ""; } catch { return q || ""; }
+})();
+const $ = (s) => document.querySelector(s);
+const L = {
+  zh: { useful: "👍 有用", saved: "⭐ 收藏", used: "✅ 已用", no: "🙅 不感興趣", done: "✓ 已記下", until: "到 {d}", left: "（剩 {n} 天）", noDate: "期限未知",
+        cond: "條件：", unsure: "這條我不確定還有沒有效，建議先確認", orig: "原文", reasons: ["merchant:不喜歡這家", "category:不需要這類", "too_far:太遠", "not_enough:折扣不夠", ":就是不想要"],
+        err: "糟糕，出錯了：", noDigest: "今天沒有達標的好康，寧缺勿濫～", hello: "嗨！想知道最近有什麼好康就問我，看到優惠也可以直接貼給我或截圖丟過來 🐑",
+        me: "好朋友認識的你", city: "城市", unknown: "還不知道", thr: "折扣門檻", perDay: "每天最多推 {n} 則", paused: "（已暫停）", likes: "喜歡", dislikes: "不喜歡",
+        ctx: "常花錢", mech: "偏好優惠", intents: "最近要做", savedMonth: "這個月估計省了 ${a}（用了 {n} 個）", ph: "問我最近有什麼好康，或貼上你看到的優惠",
+        send: "送出", brand: "好朋友優惠 🐑", today: "今天的推薦", mine: "你眼中的我", image: "📷 圖片", del: "刪除" },
+  en: { useful: "👍 Useful", saved: "⭐ Save", used: "✅ Used it", no: "🙅 Not for me", done: "✓ Noted", until: "until {d}", left: " ({n} days left)", noDate: "no end date",
+        cond: "Conditions: ", unsure: "Not sure this is still valid, double-check first", orig: "Original post", reasons: ["merchant:Don't like this place", "category:Don't need this kind", "too_far:Too far", "not_enough:Discount too small", ":Just not for me"],
+        err: "Oops, something went wrong: ", noDigest: "Nothing good enough today. Better none than noise!", hello: "Hi! Ask me what deals are around, or paste / screenshot any deal you spot 🐑",
+        me: "What I know about you", city: "City", unknown: "not sure yet", thr: "discount bar", perDay: "up to {n} pushes a day", paused: " (paused)", likes: "Likes", dislikes: "Dislikes",
+        ctx: "Spends on", mech: "Favorite deal types", intents: "Planning", savedMonth: "Saved about ${a} this month ({n} deals used)", ph: "Ask me about deals, or paste one you found",
+        send: "Send", brand: "DealBuddy 🐑", today: "Today's picks", mine: "About me", image: "📷 image", del: "remove" },
+};
+let lang = (() => { try { return localStorage.getItem("dealbuddy_lang") || (navigator.language.startsWith("zh") ? "zh" : "en"); } catch { return "zh"; } })();
+const T = (k, v = {}) => String(L[lang][k]).replace(/\{(\w)\}/g, (_, x) => v[x] ?? "");
+function setLang(code) {
+  if (!code) return; lang = code.startsWith("zh") ? "zh" : "en";
+  try { localStorage.setItem("dealbuddy_lang", lang); } catch {}
+  document.documentElement.lang = lang === "zh" ? "zh-Hant" : "en";
+  $("#t").placeholder = T("ph"); $("header h1").textContent = T("brand"); document.title = T("brand").replace(" 🐑", ""); $(".send").textContent = T("send"); $("#digestBtn").textContent = T("today"); $("#profileBtn").textContent = T("mine");
+}
+const headers = { "Content-Type": "application/json", ...(token ? { "X-App-Token": token } : {}) };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function add(role, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + (role === "me" ? "me" : "bot");
+  d.innerHTML = `<div class="bubble">${esc(text)}</div>`;
+  $("#log").appendChild(d); scrollTo(0, document.body.scrollHeight);
+}
+
+function cards(list) {
+  if (!list || !list.length) return;
+  const wrap = document.createElement("div"); wrap.className = "cards";
+  for (const c of list) {
+    const el = document.createElement("div"); el.className = "card";
+    const until = c.valid_until ? T("until", { d: c.valid_until }) + (c.days_left != null ? T("left", { n: c.days_left }) : "") : T("noDate");
+    el.innerHTML = `<h3>${esc(c.title)}</h3>
+      <div class="meta">${esc(c.merchant || "")} · ${esc(c.mechanic)}${c.value ? " · " + esc(c.value) : ""} · ${esc(until)}</div>
+      ${c.summary && c.summary !== c.title ? `<div class="meta">${esc(c.summary)}</div>` : ""}
+      ${c.reasons.length ? `<div class="why">${esc(c.reasons.join(lang === "zh" ? "，" : ", "))}</div>` : ""}
+      ${c.conditions.length ? `<div class="meta">${T("cond")}${esc(c.conditions.join("; "))}</div>` : ""}
+      ${c.uncertain ? `<div class="warn">${T("unsure")}</div>` : ""}
+      ${c.url ? `<div class="meta"><a href="${esc(c.url)}" target="_blank" rel="noopener">${T("orig")}</a>${c.original_title !== c.title ? " · " + esc(c.original_title) : ""}</div>` : ""}
+      <div class="actions">
+        <button data-s="useful">${T("useful")}</button><button data-s="saved">${T("saved")}</button>
+        <button data-s="used">${T("used")}</button><button data-s="not_interested">${T("no")}</button>
+      </div>`;
+    el.querySelectorAll("button[data-s]").forEach((b) => b.onclick = () => fb(c.deal_id, b.dataset.s, el, b));
+    wrap.appendChild(el);
+  }
+  $("#log").appendChild(wrap); scrollTo(0, document.body.scrollHeight);
+}
+
+async function fb(dealId, signal, el, btn, reason) {
+  if (signal === "not_interested" && reason === undefined) {
+    const box = el.querySelector(".actions");
+    box.innerHTML = L[lang].reasons
+      .map((x) => `<button data-r="${x.split(":")[0]}">${x.split(":")[1]}</button>`).join("");
+    box.querySelectorAll("button").forEach((b) => b.onclick = () => fb(dealId, signal, el, b, b.dataset.r || null));
+    return;
+  }
+  await fetch("/feedback", { method: "POST", headers, body: JSON.stringify({ user_id: uid, deal_id: dealId, signal, reason }) });
+  btn.classList.add("done"); btn.textContent = T("done");
+}
+
+async function send(text, image) {
+  add("me", text || T("image"));
+  const body = { user_id: uid, text, lang: navigator.language || lang };
+  if (image) { body.image_base64 = image.data; body.image_media_type = image.type; }
+  const r = await fetch("/chat", { method: "POST", headers, body: JSON.stringify(body) });
+  if (!r.ok) { add("bot", T("err") + r.status); return; }
+  const j = await r.json(); setLang(j.lang); add("bot", j.reply); cards(j.cards);
+}
+
+$("#f").onsubmit = (e) => { e.preventDefault(); const t = $("#t").value.trim(); if (!t) return; $("#t").value = ""; send(t); };
+$("#t").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#f").requestSubmit(); } };
+$("#img").onchange = () => {
+  const file = $("#img").files[0]; if (!file) return;
+  const rd = new FileReader();
+  rd.onload = () => { send($("#t").value.trim(), { data: rd.result.split(",")[1], type: file.type || "image/jpeg" }); $("#t").value = ""; };
+  rd.readAsDataURL(file); $("#img").value = "";
+};
+
+$("#digestBtn").onclick = async () => {
+  const r = await fetch(`/digest/preview?user_id=${encodeURIComponent(uid)}`, { method: "POST", headers });
+  const j = await r.json(); add("bot", j.text || T("noDigest")); cards(j.cards);
+};
+
+async function loadProfile() {
+  const p = await (await fetch(`/profile?user_id=${encodeURIComponent(uid)}`, { headers })).json();
+  setLang(p.language);
+  const chip = (label, action, target, layer) => `<span class="chip">${esc(label)}<button title="${T("del")}" data-a="${action}" data-t="${esc(target)}" data-l="${layer || ""}">✕</button></span>`;
+  const s = p.savings_this_month || { estimated_saved: 0, deals_used: 0 };
+  $("#profile").innerHTML = `<h2>${T("me")}</h2>
+    <div class="meta">${T("city")}: ${esc(p.city || T("unknown"))} · ${T("thr")} ${Math.round((p.discount_threshold || 0.2) * 100)}% · ${T("perDay", { n: p.push.daily_limit })}${p.push.paused ? T("paused") : ""}</div>
+    <div class="meta">${T("savedMonth", { a: s.estimated_saved, n: s.deals_used })}</div>
+    <p>${T("likes")}: ${p.likes.map((x) => chip(`${x.name} ${x.score}`, "forget", x.target, "entity")).join("") || "—"}</p>
+    <p>${T("dislikes")}: ${p.dislikes.map((x) => chip(`${x.name} ${x.score}`, "forget", x.target, "entity")).join("") || "—"}</p>
+    <p>${T("ctx")}: ${p.contexts.map((x) => chip(`${x.target} ${x.score}`, "forget", x.target, "context")).join("") || "—"}</p>
+    <p>${T("mech")}: ${p.mechanics.map((x) => chip(`${x.target} ${x.score}`, "forget", x.target, "mechanic")).join("") || "—"}</p>
+    <p>${T("intents")}: ${p.intents.map((x) => chip(`${x.label} (${String(x.expires_at).slice(0, 10)})`, "close_intent", x.target)).join("") || "—"}</p>`;
+  $("#profile").querySelectorAll("button[data-a]").forEach((b) => b.onclick = async () => {
+    await fetch(`/profile?user_id=${encodeURIComponent(uid)}`, { method: "PATCH", headers,
+      body: JSON.stringify({ changes: [{ action: b.dataset.a, target: b.dataset.t, layer: b.dataset.l || null }] }) });
+    loadProfile();
+  });
+}
+$("#profileBtn").onclick = () => { const s = $("#profile"); const show = s.style.display !== "block"; s.style.display = show ? "block" : "none"; if (show) loadProfile(); };
+setLang(lang); add("bot", T("hello"));
+</script>
+</body>
+</html>
