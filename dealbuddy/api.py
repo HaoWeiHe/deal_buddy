@@ -87,7 +87,8 @@ def index():
 
 @app.get("/health")
 def health():
-    return {"ok": True, "llm": settings.llm_enabled, "xiaohongshu": bool(settings.xhs_url)}
+    return {"ok": True, "db": "postgres" if settings.database_url else "sqlite", "llm": settings.llm_enabled,
+            "xiaohongshu": bool(settings.xhs_url)}
 
 
 @app.post("/chat", dependencies=[Depends(auth)])

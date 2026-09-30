@@ -175,9 +175,9 @@ def run_xiaohongshu(src: XiaohongshuSource | None = None) -> list[dict]:
     return saved
 
 
-def search_for_intent(user_id: str) -> list[dict]:
+def search_for_intent(user_id: str, src: XiaohongshuSource | None = None) -> list[dict]:
     """Called when a new intent appears, so the friend starts looking right away."""
-    src = XiaohongshuSource()
+    src = src or XiaohongshuSource()
     if not src.enabled or not src.logged_in():
         return []
     saved = []
