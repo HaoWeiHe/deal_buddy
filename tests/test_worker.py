@@ -58,3 +58,10 @@ def test_login_helper_saves_qr_and_waits(tmp_path):
     out = tmp_path / "qr.png"
     assert xhs_login.main(["--out", str(out)], src=src, poll_seconds=0) == 0
     assert out.read_bytes() == png
+
+
+def test_login_timeout_parses_go_durations():
+    assert xhs_login.parse_timeout("4m0s") == 240
+    assert xhs_login.parse_timeout("300") == 300
+    assert xhs_login.parse_timeout("1m30s") == 90
+    assert xhs_login.parse_timeout(None) == 240

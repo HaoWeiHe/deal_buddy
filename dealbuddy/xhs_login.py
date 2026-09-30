@@ -8,30 +8,41 @@ The MCP keeps the cookies in its data volume, so this is only needed again when 
 """
 import argparse
 import base64
+import re
 import sys
 import time
 
 from .sources import XiaohongshuSource
 
 
-def save_qr(src: XiaohongshuSource, out: str) -> int:
-    """Write the QR PNG to `out`. Returns the MCP's timeout in seconds."""
+def parse_timeout(value, default: int = 240) -> int:
+    """The MCP reports a Go duration like "4m0s"; older docs show plain seconds ("300")."""
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value or "").strip()
+    if text.isdigit():
+        return int(text)
+    parts = re.findall(r"(\d+(?:\.\d+)?)(h|ms|m|s)", text)
+    if not parts:
+        return default
+    scale = {"h": 3600, "m": 60, "s": 1, "ms": 0.001}
+    return int(sum(float(n) * scale[u] for n, u in parts))
+
+
+def save_qr(src: XiaohongshuSource, out: str) -> int | None:
+    """Write the QR PNG to `out`. Returns the MCP's timeout in seconds, or None if already logged in."""
     data = src._data(src.http.get("/api/v1/login/qrcode"))
+    if data.get("is_logged_in"):
+        return None
     img = data.get("img") or ""
     if "," in img:
         img = img.split(",", 1)[1]
     with open(out, "wb") as f:
         f.write(base64.b64decode(img))
-    timeout = data.get("timeout") or 240
-    if isinstance(timeout, str):
-        digits = "".join(ch for ch in timeout if ch.isdigit())
-        timeout = int(digits) if digits else 240
-        if timeout > 10000:  # some versions report milliseconds
-            timeout //= 1000
-    return int(timeout)
+    return parse_timeout(data.get("timeout"))
 
 
-def main(argv: list[str] | None = None, *, src: XiaohongshuSource | None = None, poll_seconds: float = 3) -> int:
+def main(argv: list[str] | None = None, *, src: XiaohongshuSource | None = None, poll_seconds: float = 10) -> int:
     parser = argparse.ArgumentParser(description="小紅書小號掃碼登入")
     parser.add_argument("--out", default="data/xhs-login.png")
     args = parser.parse_args(argv)
@@ -47,6 +58,9 @@ def main(argv: list[str] | None = None, *, src: XiaohongshuSource | None = None,
     except Exception as e:
         print(f"連不上 xiaohongshu-mcp（{src.base_url}）：{e}\n先確認 `docker compose ps` 裡它有在跑。")
         return 2
+    if timeout is None:
+        print("已經登入了，不用再掃。")
+        return 0
     print(f"QR code 已存到 {args.out}。用小號的小紅書 app 掃描（{timeout} 秒內有效），這裡會等你掃完。")
     deadline = time.time() + timeout
     while time.time() < deadline:

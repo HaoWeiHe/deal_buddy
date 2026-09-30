@@ -63,6 +63,10 @@ class XiaohongshuSource:
     def logged_in(self) -> bool:
         try:
             data = self._data(self.http.get("/api/v1/login/status"))
+        except httpx.HTTPStatusError as e:
+            # The MCP answers 500 when its browser can't load xiaohongshu.com in time (slow first start, network).
+            log.warning("xiaohongshu-mcp login check failed (HTTP %s), treating as logged out", e.response.status_code)
+            return False
         except Exception as e:
             log.warning("xiaohongshu-mcp not reachable: %s", e)
             return False
