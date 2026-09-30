@@ -40,7 +40,28 @@ python -m dealbuddy.digest    # 只用網頁版時手動跑每日推薦；Telegr
 5. 每日推薦：`vercel.json` 設定 Vercel Cron 每天 15:00 UTC（多倫多上午 10 或 11 點）呼叫 `/cron/daily`，會抓 RSS / IG 並送出 Telegram 每日推薦。
    Hobby 方案一天只能跑一次 cron，所以「即時推」只在本機長駐的 `python -m dealbuddy.telegram_bot` 有。
 
-小紅書的 xiaohongshu-mcp 需要一直開著、已經登入的瀏覽器，放不進 Vercel。它要跑在常駐的機器上，再用 `python -m dealbuddy.sources` 定時抓，資料寫進同一個 `DATABASE_URL`。
+## 小紅書：常駐主機（`deploy/xhs-host`）
+
+xiaohongshu-mcp 需要一直開著、已經登入的瀏覽器，放不進 Vercel。所以另外找一台一直開著的 Linux 機器（$5/月的 VPS 即可，建議 x86、1 GB 以上記憶體），用 Docker Compose 跑兩個服務：
+
+- `xiaohongshu-mcp`：社群版 MCP，只開給本機，登入的 cookie 存在 `data/`
+- `worker`（`dealbuddy/worker.py`）：每 `XHS_INTERVAL_HOURS` 小時依所有使用者的城市、意圖、喜歡的商家搜小紅書，也順便跑 IG / RSS；每 `WORKER_POLL_MINUTES` 分鐘檢查有沒有新意圖，有就馬上幫那個人搜；有設 `TELEGRAM_BOT_TOKEN` 的話也從這裡送即時推
+
+worker 直接寫進 Vercel 用的同一個 Postgres，Vercel 那邊不用改任何設定。
+
+```bash
+git clone https://github.com/HaoWeiHe/deal_buddy && cd deal_buddy/deploy/xhs-host
+cp .env.example .env          # 填 DATABASE_URL（從 Vercel 的 Neon 複製）、ANTHROPIC_API_KEY 等
+docker compose up -d
+docker compose run --rm worker python -m dealbuddy.xhs_login   # 產生 data/xhs-login.png 並等你掃
+```
+
+在自己電腦執行 `scp 你的主機:deal_buddy/deploy/xhs-host/data/xhs-login.png .`，用**小號**的小紅書 app 掃碼。登入後 cookie 會保留，過期時 worker 的 log 會提醒你重掃（`docker compose logs -f worker`）。
+
+注意：
+- 不要在 Vercel 設 `XHS_MCP_URL`，MCP 只給這台主機用。
+- 建議設 `XHS_MCP_TOKEN`，MCP 的 API 會要求密碼。
+- 小號的風險：頻率預設很低（每輪最多讀 10 篇、每次間隔 5 秒）。被要求驗證或登出時 worker 只會停抓小紅書，其他來源照常。
 
 ## 兩種模式
 
@@ -113,6 +134,7 @@ Telegram 指令：`/today` 今天的推薦、`/me` 你眼中的我、`/forgetme`
 | `metrics.py` | 估計省下金額與成功指標 |
 | `digest.py` | 每日推薦（≥ 0.6、最多 3 則、安靜時段、沒有就不發）與即時推（≥ 0.85 且 48 小時內到期或對上意圖） |
 | `sources.py` | 小紅書 MCP、IG Graph API、RSS |
+| `worker.py` / `xhs_login.py` | 常駐主機的定時抓取迴圈、小號掃碼登入 |
 | `telegram_bot.py` | Telegram long polling bot |
 | `web/index.html` | 網頁聊天 |
 

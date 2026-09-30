@@ -1,0 +1,35 @@
+# Always-on host for 小紅書: xiaohongshu-mcp (logged-in browser) + the DealBuddy worker.
+# The worker writes into the same Postgres as the Vercel app, so new deals show up there.
+#
+#   cp .env.example .env    # fill DATABASE_URL etc.
+#   docker compose up -d
+#   docker compose run --rm worker python -m dealbuddy.xhs_login   # scan data/xhs-login.png once
+services:
+  xiaohongshu-mcp:
+    image: xpzouying/xiaohongshu-mcp
+    restart: unless-stopped
+    tty: true
+    volumes:
+      - ./data:/app/data
+      - ./images:/app/images
+    environment:
+      - COOKIES_PATH=/app/data/cookies.json
+      - HOME=/app/data/home
+      - XDG_CONFIG_HOME=/app/data/config
+      - AUTH_TOKEN=${XHS_MCP_TOKEN:-}
+    # Only reachable from this machine; the worker talks to it over the compose network.
+    ports:
+      - "127.0.0.1:18060:18060"
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/xhs-host/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - xiaohongshu-mcp
+    env_file: .env
+    environment:
+      - XHS_MCP_URL=http://xiaohongshu-mcp:18060
+    volumes:
+      - ./data:/app/data
