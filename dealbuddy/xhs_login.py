@@ -31,7 +31,8 @@ def parse_timeout(value, default: int = 240) -> int:
 
 def save_qr(src: XiaohongshuSource, out: str) -> int | None:
     """Write the QR PNG to `out`. Returns the MCP's timeout in seconds, or None if already logged in."""
-    data = src._data(src.http.get("/api/v1/login/qrcode"))
+    # The MCP opens xiaohongshu.com in a fresh browser first; on a small or slow host that can take minutes.
+    data = src._data(src.http.get("/api/v1/login/qrcode", timeout=180))
     if data.get("is_logged_in"):
         return None
     img = data.get("img") or ""

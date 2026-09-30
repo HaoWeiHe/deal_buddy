@@ -1,7 +1,7 @@
 """End-to-end through the HTTP API in offline mode (no API key)."""
 from fastapi.testclient import TestClient
 
-from dealbuddy import api, profile, seed
+from dealbuddy import api, db, profile, seed
 
 
 def client():
@@ -53,3 +53,15 @@ def test_feedback_and_profile_patch_endpoints():
 def test_new_user_gets_onboarding():
     r = client().post("/chat", json={"user_id": "n", "text": "嗨"}).json()
     assert "住哪個城市" in r["reply"]
+
+
+def test_offline_short_onboarding_answers_are_recorded():
+    """A new user answering the onboarding questions with short replies must not get the greeting again."""
+    from dealbuddy import chat, profile
+
+    first = chat.handle("short", "嗨", lang_hint="zh-TW")["reply"]
+    assert "你住哪個城市" in first
+    assert "你住哪個城市" not in chat.handle("short", "我住多倫多")["reply"]
+    assert db.get_user("short")["city"] == "多倫多"
+    assert "你住哪個城市" not in chat.handle("short", "洗牙")["reply"]
+    assert profile.get_belief("short", "intent", "dental_cleaning")

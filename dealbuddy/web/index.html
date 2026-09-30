@@ -63,13 +63,13 @@ const $ = (s) => document.querySelector(s);
 const L = {
   zh: { useful: "👍 有用", saved: "⭐ 收藏", used: "✅ 已用", no: "🙅 不感興趣", done: "✓ 已記下", until: "到 {d}", left: "（剩 {n} 天）", noDate: "期限未知",
         cond: "條件：", unsure: "這條我不確定還有沒有效，建議先確認", orig: "原文", reasons: ["merchant:不喜歡這家", "category:不需要這類", "too_far:太遠", "not_enough:折扣不夠", ":就是不想要"],
-        err: "糟糕，出錯了：", noDigest: "今天沒有達標的好康，寧缺勿濫～", hello: "嗨！想知道最近有什麼好康就問我，看到優惠也可以直接貼給我或截圖丟過來 🐑",
+        err: "糟糕，出錯了：", askToken: "請輸入這個 app 的密碼（DEALBUDDY_APP_TOKEN）", badToken: "需要密碼才能使用，重新整理頁面就能再輸入。", noDigest: "今天沒有達標的好康，寧缺勿濫～", hello: "嗨！想知道最近有什麼好康就問我，看到優惠也可以直接貼給我或截圖丟過來 🐑",
         me: "好朋友認識的你", city: "城市", unknown: "還不知道", thr: "折扣門檻", perDay: "每天最多推 {n} 則", paused: "（已暫停）", likes: "喜歡", dislikes: "不喜歡",
         ctx: "常花錢", mech: "偏好優惠", intents: "最近要做", savedMonth: "這個月估計省了 ${a}（用了 {n} 個）", ph: "問我最近有什麼好康，或貼上你看到的優惠",
         send: "送出", brand: "好朋友優惠 🐑", today: "今天的推薦", mine: "你眼中的我", image: "📷 圖片", del: "刪除" },
   en: { useful: "👍 Useful", saved: "⭐ Save", used: "✅ Used it", no: "🙅 Not for me", done: "✓ Noted", until: "until {d}", left: " ({n} days left)", noDate: "no end date",
         cond: "Conditions: ", unsure: "Not sure this is still valid, double-check first", orig: "Original post", reasons: ["merchant:Don't like this place", "category:Don't need this kind", "too_far:Too far", "not_enough:Discount too small", ":Just not for me"],
-        err: "Oops, something went wrong: ", noDigest: "Nothing good enough today. Better none than noise!", hello: "Hi! Ask me what deals are around, or paste / screenshot any deal you spot 🐑",
+        err: "Oops, something went wrong: ", askToken: "Enter this app's password (DEALBUDDY_APP_TOKEN)", badToken: "A password is needed. Reload the page to enter it.", noDigest: "Nothing good enough today. Better none than noise!", hello: "Hi! Ask me what deals are around, or paste / screenshot any deal you spot 🐑",
         me: "What I know about you", city: "City", unknown: "not sure yet", thr: "discount bar", perDay: "up to {n} pushes a day", paused: " (paused)", likes: "Likes", dislikes: "Dislikes",
         ctx: "Spends on", mech: "Favorite deal types", intents: "Planning", savedMonth: "Saved about ${a} this month ({n} deals used)", ph: "Ask me about deals, or paste one you found",
         send: "Send", brand: "DealBuddy 🐑", today: "Today's picks", mine: "About me", image: "📷 image", del: "remove" },
@@ -127,11 +127,19 @@ async function fb(dealId, signal, el, btn, reason) {
   btn.classList.add("done"); btn.textContent = T("done");
 }
 
+// A deployment with DEALBUDDY_APP_TOKEN rejects requests without it; ask once and remember it.
+function askToken() {
+  const t = (prompt(T("askToken")) || "").trim();
+  try { localStorage.removeItem("dealbuddy_token"); if (t) localStorage.setItem("dealbuddy_token", t); } catch {}
+  if (t) { location.href = location.pathname; } else { add("bot", T("badToken")); }
+}
+
 async function send(text, image) {
   add("me", text || T("image"));
   const body = { user_id: uid, text, lang: navigator.language || lang };
   if (image) { body.image_base64 = image.data; body.image_media_type = image.type; }
   const r = await fetch("/chat", { method: "POST", headers, body: JSON.stringify(body) });
+  if (r.status === 401) { askToken(); return; }
   if (!r.ok) { add("bot", T("err") + r.status); return; }
   const j = await r.json(); setLang(j.lang); add("bot", j.reply); cards(j.cards);
 }
