@@ -34,8 +34,7 @@ def respond(user_id: str, text: str, extra_note: str | None = None) -> dict:
     said: list[str] = []
     t = text.strip()
 
-    if profile.is_new_user(user_id) and len(t) <= 12 and not any(w in t.lower() for w in ASK_WORDS):
-        return {"reply": i18n.t("onboarding", lang), "shown": []}
+    new_user = profile.is_new_user(user_id)
 
     # City
     m = (re.search(r"(?:我住|住在|我在|人在)\s*([^\s，,。]{2,12}?)(?:[，,。\s]|$)", t)
@@ -86,6 +85,11 @@ def respond(user_id: str, text: str, extra_note: str | None = None) -> dict:
             tools.update_profile(user_id, {"action": "add_intent", "target": f"trip_{dest}", "label": label,
                                            "categories": ["travel", "dining"], "keywords": [], "destination": dest})
             said.append(i18n.t("said_trip", lang, dest=place))
+
+    # Greet and ask the onboarding questions only when a new user's short message taught us nothing,
+    # so short answers like 「我住多倫多」 or 「洗牙」 are recorded instead of re-triggering the greeting.
+    if new_user and not said and len(t) <= 12 and not any(w in t.lower() for w in ASK_WORDS):
+        return {"reply": i18n.t("onboarding", lang), "shown": []}
 
     if said and profile.is_new_user(user_id) is False:
         db.update_user(user_id, onboarded=1)
