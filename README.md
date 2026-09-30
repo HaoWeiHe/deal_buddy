@@ -42,7 +42,7 @@ python -m dealbuddy.digest    # 只用網頁版時手動跑每日推薦；Telegr
 
 ## 小紅書：常駐主機（`deploy/xhs-host`）
 
-xiaohongshu-mcp 需要一直開著、已經登入的瀏覽器，放不進 Vercel。所以另外找一台一直開著的 Linux 機器（$5/月的 VPS 即可，建議 x86、1 GB 以上記憶體），用 Docker Compose 跑兩個服務：
+xiaohongshu-mcp 需要一直開著、已經登入的瀏覽器，放不進 Vercel。所以另外找一台一直開著的 Linux 機器（$5/月的 VPS 即可，建議 x86、2 GB 以上記憶體，因為 MCP 裡跑的是完整的 Chrome；有多倫多機房的 Vultr、DigitalOcean 都可以，家裡一直開著的電腦也行），用 Docker Compose 跑兩個服務：
 
 - `xiaohongshu-mcp`：社群版 MCP，只開給本機，登入的 cookie 存在 `data/`
 - `worker`（`dealbuddy/worker.py`）：每 `XHS_INTERVAL_HOURS` 小時依所有使用者的城市、意圖、喜歡的商家搜小紅書，也順便跑 IG / RSS；每 `WORKER_POLL_MINUTES` 分鐘檢查有沒有新意圖，有就馬上幫那個人搜；有設 `TELEGRAM_BOT_TOKEN` 的話也從這裡送即時推
