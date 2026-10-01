@@ -123,3 +123,16 @@ def test_delete_me_removes_personal_data():
     db.delete_user("u")
     assert db.get_user("u") is None
     assert profile.beliefs("u") == []
+
+
+def test_truncated_llm_extraction_says_why(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    import pytest
+
+    from dealbuddy import extract, llm
+
+    resp = NS(stop_reason="max_tokens", content=[NS(type="text", text='{"deals": [{"title": "半')])
+    monkeypatch.setattr(llm, "client", lambda: NS(messages=NS(create=lambda **kw: resp)))
+    with pytest.raises(ValueError, match="max_tokens"):
+        extract.extract_llm("很長的整理文")
