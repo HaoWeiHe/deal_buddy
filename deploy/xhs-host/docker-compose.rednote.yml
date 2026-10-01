@@ -1,0 +1,9 @@
+# For a 小號 that lives on rednote.com (registered with a non-Chinese phone number).
+# Turn it on with COMPOSE_FILE=docker-compose.yml:docker-compose.rednote.yml in .env, then
+#   docker compose up -d --build
+services:
+  xiaohongshu-mcp:
+    image: dealbuddy/xiaohongshu-mcp-rednote
+    build:
+      context: .
+      dockerfile: rednote.Dockerfile

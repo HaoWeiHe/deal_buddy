@@ -64,6 +64,11 @@ docker compose run --rm worker python -m dealbuddy.xhs_login   # 產生 data/xhs
 如果連那個登入工具都顯示「登录流程完成但仍未登录」（小紅書風控擋掉它的瀏覽器），就用平常的 Chrome 登入小號，用 Cookie-Editor 擴充功能匯出 JSON，再轉檔：
 `python3 deploy/xhs-host/convert_cookies.py 匯出的.json > cookies.json`，一樣 scp 到主機。
 
+如果小號是用非中國手機號註冊的，登入 xiaohongshu.com 後會被轉到國際版 **rednote.com**，上游 MCP 只認 xiaohongshu.com，所以永遠看起來沒登入。
+這時在 rednote.com 上匯出 cookie（轉檔工具也收 rednote.com），並在主機的 `.env` 加一行
+`COMPOSE_FILE=docker-compose.yml:docker-compose.rednote.yml`，再 `docker compose up -d --build`：
+會用同一份上游程式、把網址換成 www.rednote.com 重新編譯 MCP（第一次 build 要幾分鐘）。
+
 注意：
 - 不要在 Vercel 設 `XHS_MCP_URL`，MCP 只給這台主機用。
 - 建議設 `XHS_MCP_TOKEN`，MCP 的 API 會要求密碼。

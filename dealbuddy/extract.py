@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 URL_RE = re.compile(r"https?://[^\s<>\"'，。！）)]+")
 # Platforms that need a login / block scraping: we never crawl them, we only read what the user shared.
-WALLED_DOMAINS = ("xiaohongshu.com", "xhslink.com", "instagram.com", "facebook.com", "fb.com", "fb.watch", "threads.net")
+WALLED_DOMAINS = ("xiaohongshu.com", "xhslink.com", "rednote.com", "instagram.com", "facebook.com", "fb.com", "fb.watch", "threads.net")
 
 ENTITY_DEFAULT_CATEGORY = {
     "doordash": "delivery", "ubereats": "delivery", "skip": "delivery", "tnt": "grocery", "loblaws": "grocery",
