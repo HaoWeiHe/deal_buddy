@@ -1,12 +1,17 @@
 """The friend: a Claude tool-use agent (spec §8). Data and ranking come from tools, never from model memory."""
 import json
 import logging
+import time
+
+import anthropic
 
 from . import db, deals, i18n, llm, profile, tools
 from .config import settings
 
 log = logging.getLogger(__name__)
 MAX_STEPS = 10
+# Don't start another model call with less time than this left in the turn.
+MIN_STEP_SECONDS = 8
 
 SYSTEM_PROMPT = """你是使用者的「好朋友」，一個很會薅羊毛、記得對方說過什麼的朋友。使用者會問你最近有什麼好康，你也會在看到他真的會在意的優惠時跟他說。
 北極星：讓對方覺得「這本來就是我要做的事，現在剛好可以順便薅一下」。
@@ -95,15 +100,28 @@ def respond(user_id: str, text: str, extra_note: str | None = None) -> dict:
 
     all_tools = [*tools.TOOL_DEFS, _web_search_tool(user_id)]
     reply = ""
+    started = time.monotonic()
     for _ in range(MAX_STEPS):
-        resp = llm.create_agent_message(
-            model=settings.agent_model,
-            max_tokens=8000,
-            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-            tools=all_tools,
-            messages=messages,
-            output_config={"effort": settings.agent_effort},
-        )
+        remaining = settings.turn_seconds - (time.monotonic() - started)
+        if remaining < MIN_STEP_SECONDS:
+            reply = i18n.t("timeout", lang)
+            break
+        # Web search is the slow part; past half the budget, answer from the deal pool only.
+        step_tools = all_tools if remaining > settings.turn_seconds / 2 else list(tools.TOOL_DEFS)
+        try:
+            resp = llm.create_agent_message(
+                model=settings.agent_model,
+                max_tokens=8000,
+                system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+                tools=step_tools,
+                messages=messages,
+                output_config={"effort": settings.agent_effort},
+                timeout=remaining,
+            )
+        except anthropic.APITimeoutError:
+            log.warning("agent turn ran out of time after %.0fs", time.monotonic() - started)
+            reply = i18n.t("timeout", lang)
+            break
         if resp.stop_reason == "refusal":
             reply = i18n.t("cant_help", lang)
             break

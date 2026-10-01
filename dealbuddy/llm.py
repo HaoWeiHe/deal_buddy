@@ -24,9 +24,15 @@ def create_agent_message(**kwargs):
     global _fallbacks_ok
     import anthropic
 
+    c = client()
+    timeout = kwargs.pop("timeout", None)
+    if timeout is not None:
+        # A retry after a timeout would blow the turn's time budget, so give up on the first one.
+        c = c.with_options(timeout=timeout, max_retries=0)
+
     if settings.use_fallbacks and _fallbacks_ok:
         try:
-            return client().beta.messages.create(
+            return c.beta.messages.create(
                 betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs
             )
         except anthropic.BadRequestError as e:
@@ -34,7 +40,7 @@ def create_agent_message(**kwargs):
                 raise
             log.warning("server-side fallbacks rejected, continuing without them: %s", e)
             _fallbacks_ok = False
-    return client().beta.messages.create(**kwargs)
+    return c.beta.messages.create(**kwargs)
 
 
 def text_of(message) -> str:
