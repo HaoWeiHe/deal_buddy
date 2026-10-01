@@ -2,7 +2,8 @@
 """Turn cookies exported from a normal browser into the cookies.json that xiaohongshu-mcp loads.
 
 Use it when the MCP's own login tool can't finish (小紅書 risk control often rejects its browser):
-log in to xiaohongshu.com with the dedicated account in your everyday Chrome, export the cookies with
+log in to xiaohongshu.com (or rednote.com, for an account made with a non-Chinese phone number) with the
+dedicated account in your everyday Chrome, export the cookies with
 the Cookie-Editor extension (Export -> JSON), then:
 
     python3 convert_cookies.py exported.json > cookies.json
@@ -14,6 +15,7 @@ import json
 import sys
 import time
 
+DOMAINS = ("xiaohongshu.com", "rednote.com")
 SAME_SITE = {"no_restriction": "None", "none": "None", "lax": "Lax", "strict": "Strict"}
 
 
@@ -22,7 +24,7 @@ def convert(exported: list[dict]) -> list[dict]:
     out = []
     for c in exported:
         domain = c.get("domain") or ""
-        if "xiaohongshu.com" not in domain:
+        if not any(d in domain for d in DOMAINS):
             continue
         expires = c.get("expirationDate", c.get("expires"))
         if bool(c.get("session")) or expires in (None, -1):
@@ -62,8 +64,11 @@ def main(argv: list[str]) -> int:
     if not any(c["name"] == "web_session" for c in cookies):
         print("注意：沒看到 web_session cookie，匯出時小號可能還沒登入。", file=sys.stderr)
     if not cookies:
-        print("沒有任何 xiaohongshu.com 的 cookie，請確認是在小紅書網頁上匯出的。", file=sys.stderr)
+        print("沒有任何 xiaohongshu.com / rednote.com 的 cookie，請確認是在小紅書網頁上匯出的。", file=sys.stderr)
         return 1
+    if any("rednote.com" in c["domain"] for c in cookies):
+        print("這是 rednote.com 的 cookie：主機的 .env 要加 COMPOSE_FILE=docker-compose.yml:docker-compose.rednote.yml。",
+              file=sys.stderr)
     json.dump(cookies, sys.stdout, ensure_ascii=False, indent=2)
     print(f"轉好了 {len(cookies)} 個 cookie。", file=sys.stderr)
     return 0

@@ -79,8 +79,9 @@ def test_convert_browser_cookies_for_the_mcp():
         {"domain": ".xiaohongshu.com", "name": "web_session", "value": "v", "path": "/", "expirationDate": 2e9,
          "httpOnly": True, "secure": True, "sameSite": "no_restriction"},
         {"domain": "www.xiaohongshu.com", "name": "a1", "value": "x", "session": True, "sameSite": "lax"},
+        {"domain": ".rednote.com", "name": "id_token", "value": "z"},
         {"domain": ".google.com", "name": "NID", "value": "y"},
     ])
-    assert [c["name"] for c in out] == ["web_session", "a1"]
+    assert [c["name"] for c in out] == ["web_session", "a1", "id_token"]
     assert out[0]["sameSite"] == "None" and out[0]["expires"] == 2e9
     assert out[1]["expires"] > 0 and out[1]["sameSite"] == "Lax"
