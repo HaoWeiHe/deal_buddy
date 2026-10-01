@@ -61,6 +61,8 @@ docker compose run --rm worker python -m dealbuddy.xhs_login   # 產生 data/xhs
 如果主機上拿不到 QR code（小紅書會把沒登入的機房訪客直接轉到 `/login` 頁，MCP 就等不到登入小視窗），改在自己的電腦登入再把 cookie 複製過去：
 從 [xiaohongshu-mcp Releases](https://github.com/xpzouying/xiaohongshu-mcp/releases) 下載 `xiaohongshu-login-darwin-arm64`（或 Windows / Linux 版）執行，用小號掃碼，會在同一個資料夾產生 `cookies.json`；
 `scp cookies.json 你的主機:deal_buddy/deploy/xhs-host/data/cookies.json` 後 `docker compose restart`。
+如果連那個登入工具都顯示「登录流程完成但仍未登录」（小紅書風控擋掉它的瀏覽器），就用平常的 Chrome 登入小號，用 Cookie-Editor 擴充功能匯出 JSON，再轉檔：
+`python3 deploy/xhs-host/convert_cookies.py 匯出的.json > cookies.json`，一樣 scp 到主機。
 
 注意：
 - 不要在 Vercel 設 `XHS_MCP_URL`，MCP 只給這台主機用。
