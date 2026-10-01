@@ -123,13 +123,16 @@ def extract_llm(text: str, *, image_b64: str | None = None, image_type: str = "i
     content.append({"type": "text", "text": body})
     resp = llm.client().messages.create(
         model=settings.extract_model,
-        max_tokens=4000,
+        # A 小紅書 round-up post can list a dozen deals, each with zh + en fields; 4000 tokens cut those off.
+        max_tokens=16000,
         system=EXTRACT_PROMPT.format(today=deals.today().isoformat(), city=city or "未知"),
         messages=[{"role": "user", "content": content}],
         output_config={"format": {"type": "json_schema", "schema": DEAL_SCHEMA}},
     )
     if resp.stop_reason == "refusal":
         return {"deals": [], "needs_screenshot": False}
+    if resp.stop_reason == "max_tokens":
+        raise ValueError("extraction output hit max_tokens before the JSON was complete")
     return json.loads(llm.text_of(resp))
 
 
