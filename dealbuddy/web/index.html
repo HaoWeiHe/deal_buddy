@@ -90,6 +90,7 @@ function add(role, text) {
   d.className = "msg " + (role === "me" ? "me" : "bot");
   d.innerHTML = `<div class="bubble">${esc(text)}</div>`;
   $("#log").appendChild(d); scrollTo(0, document.body.scrollHeight);
+  return d;
 }
 
 function cards(list) {
@@ -138,7 +139,14 @@ async function send(text, image) {
   add("me", text || T("image"));
   const body = { user_id: uid, text, lang: navigator.language || lang };
   if (image) { body.image_base64 = image.data; body.image_media_type = image.type; }
-  const r = await fetch("/chat", { method: "POST", headers, body: JSON.stringify(body) });
+  const wait = add("bot", "…");  // the agent can take a while (web search); show that we're on it
+  let r;
+  try {
+    r = await fetch("/chat", { method: "POST", headers, body: JSON.stringify(body) });
+  } catch (e) {
+    wait.remove(); add("bot", T("err") + e.message); return;
+  }
+  wait.remove();
   if (r.status === 401) { askToken(); return; }
   if (!r.ok) { add("bot", T("err") + r.status); return; }
   const j = await r.json(); setLang(j.lang); add("bot", j.reply); cards(j.cards);

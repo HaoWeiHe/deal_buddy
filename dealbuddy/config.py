@@ -22,6 +22,8 @@ class Settings:
     agent_model: str = field(default_factory=lambda: _env("DEALBUDDY_AGENT_MODEL", "claude-sonnet-5-5"))
     extract_model: str = field(default_factory=lambda: _env("DEALBUDDY_EXTRACT_MODEL", "claude-haiku-4-5"))
     agent_effort: str = field(default_factory=lambda: _env("DEALBUDDY_AGENT_EFFORT", "medium"))
+    # Vercel stops the function at 60s (vercel.json maxDuration); a chat turn has to answer before that.
+    turn_seconds: float = field(default_factory=lambda: float(_env("DEALBUDDY_TURN_SECONDS", "45")))
     use_fallbacks: bool = field(default_factory=lambda: _env("DEALBUDDY_FALLBACKS", "1") == "1")
     telegram_token: str = field(default_factory=lambda: _env("TELEGRAM_BOT_TOKEN"))
     app_token: str = field(default_factory=lambda: _env("DEALBUDDY_APP_TOKEN"))
