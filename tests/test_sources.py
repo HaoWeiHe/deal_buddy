@@ -54,3 +54,46 @@ def test_keywords_include_liked_merchants():
     db.ensure_user("u", city="Toronto")
     profile.set_belief("u", "entity", "tnt", 0.8)
     assert "多伦多 T&T 优惠" in sources.intent_keywords("u")
+
+
+def test_note_pictures_go_to_the_extractor(monkeypatch):
+    from dealbuddy import config, extract
+
+    jpeg, webp = b"\xff\xd8\xff\xe0poster", b"RIFF\x00\x00\x00\x00WEBPprice-list"
+
+    def cdn(request: httpx.Request) -> httpx.Response:
+        body = {"/a.jpg": jpeg, "/b.webp": webp, "/c.txt": b"not an image"}.get(request.url.path)
+        return httpx.Response(200, content=body) if body else httpx.Response(404)
+
+    cdn_http = httpx.Client(transport=httpx.MockTransport(cdn))
+    note = {"imageList": [{"urlDefault": f"https://cdn/{p}"} for p in ("a.jpg", "b.webp", "c.txt", "gone.jpg", "e.jpg")]}
+    imgs = sources.note_images(note, limit=4, http=cdn_http)
+    assert [t for _, t in imgs] == ["image/jpeg", "image/webp"]
+
+    seen = {}
+    monkeypatch.setattr(config.settings, "anthropic_api_key", "test")
+    monkeypatch.setattr(sources, "note_images", lambda note, limit: [("aW1n", "image/png")])
+    monkeypatch.setattr(extract, "extract_llm", lambda text, **kw: seen.update(kw) or {"deals": []})
+    src, _ = fake_xhs()
+    src.ingest_feeds([{"id": "n1", "xsecToken": "tok"}], budget=1)
+    assert seen["images"] == [("aW1n", "image/png")]
+
+
+def test_newest_first_stops_at_notes_already_read(monkeypatch):
+    from dealbuddy import extract
+
+    monkeypatch.setattr(extract, "ingest", lambda *a, **k: {"saved": [], "needs_screenshot": False})
+    src, calls = fake_xhs()
+    for fid in ("old1", "old2", "old3"):
+        sources._mark_seen(src.name, fid)
+    feeds = [{"id": i, "xsecToken": "t"} for i in ("n1", "old1", "old2", "old3", "n2")]
+    _, used = src.ingest_feeds(feeds, budget=10, stop_after_seen=3)
+    assert used == 1  # n2 sits below three read notes, so it is older and covered by an earlier run
+
+
+def test_keywords_rotate_between_runs():
+    kws = ["a", "b", "c"]
+    six_hours = 6 * 3600
+    assert sources.rotate(kws, now=0) == ["a", "b", "c"]
+    assert sources.rotate(kws, now=six_hours) == ["b", "c", "a"]
+    assert sources.rotate([], now=0) == []

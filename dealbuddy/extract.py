@@ -74,7 +74,12 @@ EXTRACT_PROMPT = """你是優惠資訊抽取器。從使用者分享的內容中
 今天是 {today}。使用者所在城市：{city}。
 
 規則：
-- 只抽真的優惠（折扣、免運、送禮卡、買一送一、返現、抽獎、贈品、點數）。一般心得、廣告但沒有優惠內容就回空陣列。
+- 只抽真的優惠（折扣、免運、送禮卡、買一送一、返現、抽獎、贈品、點數、開戶或存款獎勵）。一般心得、廣告但沒有優惠內容就回空陣列。
+- 小紅書的優惠細節常常只寫在圖片裡（海報、截圖、價目表），有圖片時以圖片內容為準，文字和圖片衝突時相信圖片。
+- 優惠不一定有折扣或金額。mechanic 依使用者「拿到什麼」來選：現金或帳戶入帳 → cashback；禮卡 → gift_card；
+  實體贈品（耳機、杯子…）→ free_item；點數或里程 → points。拿到的東西寫進 title，要做的事（存 $X 放 N 天、開戶、
+  消費滿額、直接存款）寫進 conditions。face_value 填獎勵本身的面額（禮卡 $100 → 100；贈品有標價才填），
+  est_value 依贈品的市價估，估不出來就留 null 並把 est_value 放進 uncertain_fields，不要硬湊。
 - percent_off 用 0 到 1 的小數（8 折 = 0.2，買一送一不用填）。face_value 是面額（美元/加幣數字），est_value 是對一般人的預估現金價值（抽獎要乘上中獎機率，通常很低）。
 - 日期一律轉成 YYYY-MM-DD；「月底」「本週日」這類相對日期依今天換算。沒寫就填 null。
 - conditions 列出門檻與限制（限新客、需保險、滿 $50、限 app 下單…），每條一句。
@@ -113,10 +118,12 @@ def fetch_page_text(url: str, max_chars: int = 8000) -> str | None:
 # ---- LLM path --------------------------------------------------------------
 
 def extract_llm(text: str, *, image_b64: str | None = None, image_type: str = "image/jpeg",
-                page_text: str | None = None, city: str | None = None) -> dict:
+                page_text: str | None = None, city: str | None = None,
+                images: list[tuple[str, str]] | None = None) -> dict:
+    """`images` are extra (base64, media type) pairs, e.g. the pictures of a 小紅書 note."""
     content: list[dict] = []
-    if image_b64:
-        content.append({"type": "image", "source": {"type": "base64", "media_type": image_type, "data": image_b64}})
+    for data, media_type in ([(image_b64, image_type)] if image_b64 else []) + list(images or []):
+        content.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}})
     body = f"使用者分享的內容：\n{text or '(只有圖片)'}"
     if page_text:
         body += f"\n\n連結頁面文字：\n{page_text}"
@@ -284,7 +291,8 @@ def extract_offline(text: str) -> dict:
 # ---- entry point ---------------------------------------------------------------
 
 def ingest(text: str = "", *, user_id: str | None = None, image_b64: str | None = None,
-           image_type: str = "image/jpeg", source_type: str = "user_share", city: str | None = None) -> dict:
+           image_type: str = "image/jpeg", source_type: str = "user_share", city: str | None = None,
+           images: list[tuple[str, str]] | None = None) -> dict:
     """Extract deals from shared content and store them. Returns a summary the chat layer can talk about."""
     urls = find_urls(text)
     page_text = None
@@ -292,7 +300,8 @@ def ingest(text: str = "", *, user_id: str | None = None, image_b64: str | None 
         page_text = fetch_page_text(urls[0])
     if settings.llm_enabled:
         try:
-            result = extract_llm(text, image_b64=image_b64, image_type=image_type, page_text=page_text, city=city)
+            result = extract_llm(text, image_b64=image_b64, image_type=image_type, page_text=page_text, city=city,
+                                 images=images)
         except Exception as e:  # network/API failure should not lose the share
             log.exception("LLM extraction failed, using offline extractor: %s", e)
             result = extract_offline(text + "\n" + (page_text or ""))

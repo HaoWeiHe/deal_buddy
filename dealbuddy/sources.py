@@ -6,7 +6,9 @@ Facebook has no usable channel; it only reaches us through user shares.
 
 Run periodically:  python -m dealbuddy.sources
 """
+import base64
 import logging
+import os
 import time
 import xml.etree.ElementTree as ET
 
@@ -72,11 +74,20 @@ class XiaohongshuSource:
             return False
         return bool(data.get("is_logged_in", data.get("isLoggedIn", True)))
 
-    def search(self, keyword: str, publish_time: str = "一周内") -> list[dict]:
+    def search(self, keyword: str, publish_time: str = "一周内", sort_by: str = "综合") -> list[dict]:
         data = self._data(self.http.post("/api/v1/feeds/search", json={
-            "keyword": keyword, "filters": {"sort_by": "综合", "publish_time": publish_time},
+            "keyword": keyword, "filters": {"sort_by": sort_by, "publish_time": publish_time},
         }))
         return data.get("feeds") or []
+
+    def search_newest(self, keyword: str) -> list[dict]:
+        """Newest first, so a run can stop once it reaches notes it has already read.
+        Falls back to the default order if the site rejects the filter."""
+        try:
+            return self.search(keyword, sort_by="最新")
+        except Exception as e:
+            log.info("newest-first search failed for %s (%s), using the default order", keyword, e)
+            return self.search(keyword)
 
     def recommended(self) -> list[dict]:
         return self._data(self.http.get("/api/v1/feeds/list")).get("feeds") or []
@@ -87,15 +98,25 @@ class XiaohongshuSource:
         }))
         return (data.get("data") or {}).get("note") or {}
 
-    def ingest_feeds(self, feeds: list[dict], budget: int, city: str | None = None) -> tuple[list[dict], int]:
-        """Read up to `budget` unseen notes. Returns (saved deals, detail calls used)."""
-        saved, used = [], 0
+    def ingest_feeds(self, feeds: list[dict], budget: int, city: str | None = None,
+                     stop_after_seen: int | None = None) -> tuple[list[dict], int]:
+        """Read up to `budget` unseen notes. Returns (saved deals, detail calls used).
+
+        With newest-first results, `stop_after_seen` ends the keyword after that many already-read notes in a
+        row: everything below them is older and was covered by an earlier run (a pinned note can break one)."""
+        saved, used, seen_streak = [], 0, 0
         for f in feeds:
             if budget <= 0:
                 break
             fid, token = f.get("id"), f.get("xsecToken")
-            if not fid or not token or f.get("modelType", "note") != "note" or _seen(self.name, fid):
+            if not fid or not token or f.get("modelType", "note") != "note":
                 continue
+            if _seen(self.name, fid):
+                seen_streak += 1
+                if stop_after_seen and seen_streak >= stop_after_seen:
+                    break
+                continue
+            seen_streak = 0
             try:
                 note = self.detail(fid, token)
             except Exception as e:
@@ -110,9 +131,41 @@ class XiaohongshuSource:
             if note.get("ipLocation"):
                 text += f"\n(發文地區：{note['ipLocation']})"
             url = f"https://www.xiaohongshu.com/explore/{fid}"
-            result = extract.ingest(f"{text}\n{url}", source_type=self.name, city=city)
+            images = note_images(note, settings.xhs_max_images) if settings.llm_enabled else []
+            result = extract.ingest(f"{text}\n{url}", source_type=self.name, city=city, images=images)
             saved.extend(result["saved"])
         return saved, used
+
+
+IMAGE_TYPES = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png", b"GIF8": "image/gif"}
+MAX_IMAGE_BYTES = 3_500_000  # the API takes up to 5 MB per image once base64-encoded
+
+
+def _image_type(data: bytes) -> str | None:
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return next((t for magic, t in IMAGE_TYPES.items() if data.startswith(magic)), None)
+
+
+def note_images(note: dict, limit: int, http: httpx.Client | None = None) -> list[tuple[str, str]]:
+    """Download the first pictures of a note: the deal details (posters, price lists) usually live there."""
+    out = []
+    client = http or httpx
+    for img in (note.get("imageList") or [])[:limit]:
+        url = img.get("urlDefault") or img.get("urlPre")
+        if not url:
+            continue
+        try:
+            r = client.get(url, timeout=15, follow_redirects=True,
+                           headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.xiaohongshu.com/"})
+            r.raise_for_status()
+        except httpx.HTTPError as e:
+            log.info("note image download failed: %s", e)
+            continue
+        kind = _image_type(r.content)
+        if kind and len(r.content) <= MAX_IMAGE_BYTES:
+            out.append((base64.b64encode(r.content).decode(), kind))
+    return out
 
 
 def city_keywords(metros: set[str]) -> list[str]:
@@ -146,6 +199,21 @@ def intent_keywords(user_id: str) -> list[str]:
     return out
 
 
+SEEN_STREAK_STOP = 3
+
+
+def rotate(keywords: list[str], now: float | None = None) -> list[str]:
+    """Start each run at a different keyword, so the ones listed first don't use up the budget every time."""
+    if not keywords:
+        return keywords
+    try:
+        hours = max(0.1, float(os.environ.get("XHS_INTERVAL_HOURS") or 6))
+    except ValueError:
+        hours = 6
+    k = int((time.time() if now is None else now) // (hours * 3600)) % len(keywords)
+    return keywords[k:] + keywords[:k]
+
+
 def run_xiaohongshu(src: XiaohongshuSource | None = None) -> list[dict]:
     src = src or XiaohongshuSource()
     if not src.enabled or not src.logged_in():
@@ -156,18 +224,18 @@ def run_xiaohongshu(src: XiaohongshuSource | None = None) -> list[dict]:
     for u in users:
         metros |= profile.user_metros(u["id"])
         keywords += intent_keywords(u["id"])
-    keywords = list(dict.fromkeys(keywords + city_keywords(metros)))
+    keywords = rotate(list(dict.fromkeys(keywords + city_keywords(metros))))
     budget = settings.xhs_max_details
     saved: list[dict] = []
     for kw in keywords:
         if budget <= 0:
             break
         try:
-            feeds = src.search(kw)
+            feeds = src.search_newest(kw)
         except Exception as e:
             log.warning("xiaohongshu search failed for %s: %s", kw, e)
             continue
-        new, used = src.ingest_feeds(feeds, budget)
+        new, used = src.ingest_feeds(feeds, budget, stop_after_seen=SEEN_STREAK_STOP)
         budget -= used
         saved += new
         time.sleep(settings.xhs_delay_seconds)
