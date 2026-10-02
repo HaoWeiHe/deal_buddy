@@ -136,3 +136,19 @@ def test_truncated_llm_extraction_says_why(monkeypatch):
     monkeypatch.setattr(llm, "client", lambda: NS(messages=NS(create=lambda **kw: resp)))
     with pytest.raises(ValueError, match="max_tokens"):
         extract.extract_llm("很長的整理文")
+
+
+def test_same_merchant_different_reward_stays_separate():
+    from dealbuddy import deals
+
+    base = {"merchant": "RBC", "mechanic": "gift_card", "valid_until": "2099-12-31", "title": "開戶送禮卡"}
+    a, _ = deals.save({**base, "face_value": 100}, source_type="xiaohongshu")
+    b, merged = deals.save({**base, "face_value": 50}, source_type="xiaohongshu")
+    assert a != b and not merged
+    c, merged = deals.save({**base, "face_value": 100, "title": "RBC 開戶 $100"}, source_type="xiaohongshu")
+    assert c == a and merged
+    # Without a merchant, only the same title (ignoring punctuation and case) merges.
+    x, _ = deals.save({"mechanic": "free_item", "title": "存款送 AirPods！"}, source_type="xiaohongshu")
+    y, merged = deals.save({"mechanic": "free_item", "title": "存款送airpods"}, source_type="xiaohongshu")
+    z, _ = deals.save({"mechanic": "free_item", "title": "開戶送耳機"}, source_type="xiaohongshu")
+    assert y == x and merged and z != x

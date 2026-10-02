@@ -1,5 +1,6 @@
 """Deal pool: save with dedup, expiry, and candidate lookup (spec §5 處理規則)."""
 import json
+import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -40,21 +41,44 @@ def _overlaps(a_from, a_until, b_from, b_until) -> bool:
     return lo <= hi
 
 
-def find_duplicate(merchant_id: str | None, mechanic: str, valid_from, valid_until, url: str | None = None) -> dict | None:
+def _same_offer(row, percent_off, face_value) -> bool:
+    """Two posts about one merchant are the same deal only if the reward matches where both state it,
+    e.g. a $50 and a $100 gift-card promo from the same bank stay separate."""
+    for mine, theirs in ((percent_off, row["percent_off"]), (face_value, row["face_value"])):
+        if mine is not None and theirs is not None and abs(float(mine) - float(theirs)) > 1e-6:
+            return False
+    return True
+
+
+def _norm_title(title: str | None) -> str:
+    return re.sub(r"[\W_]+", "", (title or "").lower())
+
+
+def find_duplicate(merchant_id: str | None, mechanic: str, valid_from, valid_until, url: str | None = None, *,
+                   percent_off=None, face_value=None, title: str | None = None) -> dict | None:
     if url:
         r = db.conn().execute(
             "SELECT deal_id FROM deal_sources WHERE url=? LIMIT 1", (url,)
         ).fetchone()
         if r:
             return get(r["deal_id"])
-    if not merchant_id:
-        return None
-    rows = db.conn().execute(
-        "SELECT id, valid_from, valid_until FROM deals WHERE merchant_id=? AND mechanic=? AND status!='expired'",
-        (merchant_id, mechanic),
-    ).fetchall()
+    if merchant_id:
+        rows = db.conn().execute(
+            "SELECT id, title, valid_from, valid_until, percent_off, face_value FROM deals "
+            "WHERE merchant_id=? AND mechanic=? AND status!='expired'",
+            (merchant_id, mechanic),
+        ).fetchall()
+    else:
+        # No merchant to match on: only an identical title counts as the same deal.
+        if not _norm_title(title):
+            return None
+        rows = [r for r in db.conn().execute(
+            "SELECT id, title, valid_from, valid_until, percent_off, face_value FROM deals "
+            "WHERE merchant_id IS NULL AND mechanic=? AND status!='expired'",
+            (mechanic,),
+        ).fetchall() if _norm_title(r["title"]) == _norm_title(title)]
     for r in rows:
-        if _overlaps(r["valid_from"], r["valid_until"], valid_from, valid_until):
+        if _overlaps(r["valid_from"], r["valid_until"], valid_from, valid_until) and _same_offer(r, percent_off, face_value):
             return get(r["id"])
     return None
 
@@ -71,7 +95,8 @@ def save(deal: dict, *, source_type: str, url: str | None = None, raw: str | Non
     mechanic = deal.get("mechanic") or "other"
     url = url or deal.get("url")
     c = db.conn()
-    dup = find_duplicate(merchant_id, mechanic, deal.get("valid_from"), deal.get("valid_until"), url)
+    dup = find_duplicate(merchant_id, mechanic, deal.get("valid_from"), deal.get("valid_until"), url,
+                         percent_off=deal.get("percent_off"), face_value=deal.get("face_value"), title=deal.get("title"))
     if dup:
         deal_id = dup["id"]
         # A second source is extra evidence the deal is real (spec §5 rule 1).

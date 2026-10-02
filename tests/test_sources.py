@@ -77,3 +77,23 @@ def test_note_pictures_go_to_the_extractor(monkeypatch):
     src, _ = fake_xhs()
     src.ingest_feeds([{"id": "n1", "xsecToken": "tok"}], budget=1)
     assert seen["images"] == [("aW1n", "image/png")]
+
+
+def test_newest_first_stops_at_notes_already_read(monkeypatch):
+    from dealbuddy import extract
+
+    monkeypatch.setattr(extract, "ingest", lambda *a, **k: {"saved": [], "needs_screenshot": False})
+    src, calls = fake_xhs()
+    for fid in ("old1", "old2", "old3"):
+        sources._mark_seen(src.name, fid)
+    feeds = [{"id": i, "xsecToken": "t"} for i in ("n1", "old1", "old2", "old3", "n2")]
+    _, used = src.ingest_feeds(feeds, budget=10, stop_after_seen=3)
+    assert used == 1  # n2 sits below three read notes, so it is older and covered by an earlier run
+
+
+def test_keywords_rotate_between_runs():
+    kws = ["a", "b", "c"]
+    six_hours = 6 * 3600
+    assert sources.rotate(kws, now=0) == ["a", "b", "c"]
+    assert sources.rotate(kws, now=six_hours) == ["b", "c", "a"]
+    assert sources.rotate([], now=0) == []

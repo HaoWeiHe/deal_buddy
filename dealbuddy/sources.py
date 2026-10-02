@@ -8,6 +8,7 @@ Run periodically:  python -m dealbuddy.sources
 """
 import base64
 import logging
+import os
 import time
 import xml.etree.ElementTree as ET
 
@@ -73,11 +74,20 @@ class XiaohongshuSource:
             return False
         return bool(data.get("is_logged_in", data.get("isLoggedIn", True)))
 
-    def search(self, keyword: str, publish_time: str = "一周内") -> list[dict]:
+    def search(self, keyword: str, publish_time: str = "一周内", sort_by: str = "综合") -> list[dict]:
         data = self._data(self.http.post("/api/v1/feeds/search", json={
-            "keyword": keyword, "filters": {"sort_by": "综合", "publish_time": publish_time},
+            "keyword": keyword, "filters": {"sort_by": sort_by, "publish_time": publish_time},
         }))
         return data.get("feeds") or []
+
+    def search_newest(self, keyword: str) -> list[dict]:
+        """Newest first, so a run can stop once it reaches notes it has already read.
+        Falls back to the default order if the site rejects the filter."""
+        try:
+            return self.search(keyword, sort_by="最新")
+        except Exception as e:
+            log.info("newest-first search failed for %s (%s), using the default order", keyword, e)
+            return self.search(keyword)
 
     def recommended(self) -> list[dict]:
         return self._data(self.http.get("/api/v1/feeds/list")).get("feeds") or []
@@ -88,15 +98,25 @@ class XiaohongshuSource:
         }))
         return (data.get("data") or {}).get("note") or {}
 
-    def ingest_feeds(self, feeds: list[dict], budget: int, city: str | None = None) -> tuple[list[dict], int]:
-        """Read up to `budget` unseen notes. Returns (saved deals, detail calls used)."""
-        saved, used = [], 0
+    def ingest_feeds(self, feeds: list[dict], budget: int, city: str | None = None,
+                     stop_after_seen: int | None = None) -> tuple[list[dict], int]:
+        """Read up to `budget` unseen notes. Returns (saved deals, detail calls used).
+
+        With newest-first results, `stop_after_seen` ends the keyword after that many already-read notes in a
+        row: everything below them is older and was covered by an earlier run (a pinned note can break one)."""
+        saved, used, seen_streak = [], 0, 0
         for f in feeds:
             if budget <= 0:
                 break
             fid, token = f.get("id"), f.get("xsecToken")
-            if not fid or not token or f.get("modelType", "note") != "note" or _seen(self.name, fid):
+            if not fid or not token or f.get("modelType", "note") != "note":
                 continue
+            if _seen(self.name, fid):
+                seen_streak += 1
+                if stop_after_seen and seen_streak >= stop_after_seen:
+                    break
+                continue
+            seen_streak = 0
             try:
                 note = self.detail(fid, token)
             except Exception as e:
@@ -179,6 +199,21 @@ def intent_keywords(user_id: str) -> list[str]:
     return out
 
 
+SEEN_STREAK_STOP = 3
+
+
+def rotate(keywords: list[str], now: float | None = None) -> list[str]:
+    """Start each run at a different keyword, so the ones listed first don't use up the budget every time."""
+    if not keywords:
+        return keywords
+    try:
+        hours = max(0.1, float(os.environ.get("XHS_INTERVAL_HOURS") or 6))
+    except ValueError:
+        hours = 6
+    k = int((time.time() if now is None else now) // (hours * 3600)) % len(keywords)
+    return keywords[k:] + keywords[:k]
+
+
 def run_xiaohongshu(src: XiaohongshuSource | None = None) -> list[dict]:
     src = src or XiaohongshuSource()
     if not src.enabled or not src.logged_in():
@@ -189,18 +224,18 @@ def run_xiaohongshu(src: XiaohongshuSource | None = None) -> list[dict]:
     for u in users:
         metros |= profile.user_metros(u["id"])
         keywords += intent_keywords(u["id"])
-    keywords = list(dict.fromkeys(keywords + city_keywords(metros)))
+    keywords = rotate(list(dict.fromkeys(keywords + city_keywords(metros))))
     budget = settings.xhs_max_details
     saved: list[dict] = []
     for kw in keywords:
         if budget <= 0:
             break
         try:
-            feeds = src.search(kw)
+            feeds = src.search_newest(kw)
         except Exception as e:
             log.warning("xiaohongshu search failed for %s: %s", kw, e)
             continue
-        new, used = src.ingest_feeds(feeds, budget)
+        new, used = src.ingest_feeds(feeds, budget, stop_after_seen=SEEN_STREAK_STOP)
         budget -= used
         saved += new
         time.sleep(settings.xhs_delay_seconds)
