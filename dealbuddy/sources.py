@@ -6,6 +6,7 @@ Facebook has no usable channel; it only reaches us through user shares.
 
 Run periodically:  python -m dealbuddy.sources
 """
+import base64
 import logging
 import time
 import xml.etree.ElementTree as ET
@@ -110,9 +111,41 @@ class XiaohongshuSource:
             if note.get("ipLocation"):
                 text += f"\n(發文地區：{note['ipLocation']})"
             url = f"https://www.xiaohongshu.com/explore/{fid}"
-            result = extract.ingest(f"{text}\n{url}", source_type=self.name, city=city)
+            images = note_images(note, settings.xhs_max_images) if settings.llm_enabled else []
+            result = extract.ingest(f"{text}\n{url}", source_type=self.name, city=city, images=images)
             saved.extend(result["saved"])
         return saved, used
+
+
+IMAGE_TYPES = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png", b"GIF8": "image/gif"}
+MAX_IMAGE_BYTES = 3_500_000  # the API takes up to 5 MB per image once base64-encoded
+
+
+def _image_type(data: bytes) -> str | None:
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return next((t for magic, t in IMAGE_TYPES.items() if data.startswith(magic)), None)
+
+
+def note_images(note: dict, limit: int, http: httpx.Client | None = None) -> list[tuple[str, str]]:
+    """Download the first pictures of a note: the deal details (posters, price lists) usually live there."""
+    out = []
+    client = http or httpx
+    for img in (note.get("imageList") or [])[:limit]:
+        url = img.get("urlDefault") or img.get("urlPre")
+        if not url:
+            continue
+        try:
+            r = client.get(url, timeout=15, follow_redirects=True,
+                           headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.xiaohongshu.com/"})
+            r.raise_for_status()
+        except httpx.HTTPError as e:
+            log.info("note image download failed: %s", e)
+            continue
+        kind = _image_type(r.content)
+        if kind and len(r.content) <= MAX_IMAGE_BYTES:
+            out.append((base64.b64encode(r.content).decode(), kind))
+    return out
 
 
 def city_keywords(metros: set[str]) -> list[str]:

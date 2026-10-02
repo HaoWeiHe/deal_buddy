@@ -41,6 +41,8 @@ class Settings:
     )
     xhs_read_feed: bool = field(default_factory=lambda: _env("XHS_READ_FEED", "0") == "1")
     xhs_max_details: int = field(default_factory=lambda: int(_env("XHS_MAX_DETAILS_PER_RUN", "10")))
+    # How many pictures of each note the extractor reads (posters and screenshots carry most deal details).
+    xhs_max_images: int = field(default_factory=lambda: int(_env("XHS_MAX_IMAGES", "4")))
     xhs_delay_seconds: float = field(default_factory=lambda: float(_env("XHS_DELAY_SECONDS", "5")))
     # Instagram Graph API hashtag search (needs a Business/Creator account).
     ig_user_id: str = field(default_factory=lambda: _env("IG_USER_ID"))

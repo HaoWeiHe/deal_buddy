@@ -54,3 +54,26 @@ def test_keywords_include_liked_merchants():
     db.ensure_user("u", city="Toronto")
     profile.set_belief("u", "entity", "tnt", 0.8)
     assert "多伦多 T&T 优惠" in sources.intent_keywords("u")
+
+
+def test_note_pictures_go_to_the_extractor(monkeypatch):
+    from dealbuddy import config, extract
+
+    jpeg, webp = b"\xff\xd8\xff\xe0poster", b"RIFF\x00\x00\x00\x00WEBPprice-list"
+
+    def cdn(request: httpx.Request) -> httpx.Response:
+        body = {"/a.jpg": jpeg, "/b.webp": webp, "/c.txt": b"not an image"}.get(request.url.path)
+        return httpx.Response(200, content=body) if body else httpx.Response(404)
+
+    cdn_http = httpx.Client(transport=httpx.MockTransport(cdn))
+    note = {"imageList": [{"urlDefault": f"https://cdn/{p}"} for p in ("a.jpg", "b.webp", "c.txt", "gone.jpg", "e.jpg")]}
+    imgs = sources.note_images(note, limit=4, http=cdn_http)
+    assert [t for _, t in imgs] == ["image/jpeg", "image/webp"]
+
+    seen = {}
+    monkeypatch.setattr(config.settings, "anthropic_api_key", "test")
+    monkeypatch.setattr(sources, "note_images", lambda note, limit: [("aW1n", "image/png")])
+    monkeypatch.setattr(extract, "extract_llm", lambda text, **kw: seen.update(kw) or {"deals": []})
+    src, _ = fake_xhs()
+    src.ingest_feeds([{"id": "n1", "xsecToken": "tok"}], budget=1)
+    assert seen["images"] == [("aW1n", "image/png")]
